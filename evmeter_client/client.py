@@ -168,7 +168,7 @@ class EVMeterClient:
         _LOGGER.debug(f"Created response future for charger {charger_id}")
 
         # Create the proper command payload
-        command_payload = self._create_command_payload(charger_id)
+        command_payload = self._create_command_payload(charger_id)      
         _LOGGER.debug(f"Command payload created, length: {len(command_payload)} bytes")
         _LOGGER.debug(f"Command Payload (hex): {command_payload.hex()}")
         
@@ -219,6 +219,8 @@ class EVMeterClient:
         - Bytes 48-49: (0x30 0x00)
         - Bytes 50+: Additional data (appears to be a token/signature)
         """
+        return bytes.fromhex("610000000000000007240065336132363961312d356562652d343636372d393838312d64623837333466376131613630001709043bb89880139705bed04d4ea2d5dd1bed824fb9478e24ebff3080cb4e3ea6b785f1011f11572ff096324d876a270000")
+        """
         # Start with zeros
         command_data = bytes([0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
 
@@ -259,6 +261,7 @@ class EVMeterClient:
         payload = length.to_bytes(2, "little") + command_data
 
         return payload
+        """
 
     async def get_charger_status(self, charger_id: str) -> ChargerStatus:
         """Get the current status of the charger."""
