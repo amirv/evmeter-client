@@ -113,10 +113,8 @@ class EVMeterClient:
         self._response_futures[charger_id] = future
 
         print(f"Sending command to topic: {command_topic}")
-        # This is test/debug code - use _create_command_payload in production
-        command_payload = bytes.fromhex(
-            "61000000000000000724EXAMPLE_USER_ID_HEX_STRING_GOES_HERE...truncated for security"
-        )
+        # Create the proper command payload
+        command_payload = self._create_command_payload(charger_id)
         print(f"Command Payload (hex): {command_payload.hex()}")
         # Publish the binary command payload
         await self._client.publish(
