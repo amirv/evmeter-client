@@ -101,6 +101,47 @@ The library implements the BLEWIFI protocol used by EV-Meter chargers:
 - **Response Topic**: `/BLEWIFI/users/{user_id}`
 - **Binary Payloads**: Custom binary format with comprehensive working info
 
+## MQTT Monitoring Utility
+
+The package includes a command-line utility for monitoring all MQTT traffic on the EV-Meter broker:
+
+```bash
+# After installing the package
+evmeter-monitor
+```
+
+This utility will:
+- Connect to the EV-Meter MQTT broker
+- Subscribe to all topics (`#` wildcard)  
+- Display all messages with timestamps
+- Attempt to parse payloads and show both raw and parsed data
+- Show parsing failures for non-BLEWIFI messages
+
+Example output:
+```
+[2025-11-08 13:06:29.608] Topic: /device/state/0000000000208348
+Raw payload: Text: left
+✗ Parsing failed: fromhex() argument must be str, not bytes
+------------------------------------------------------------
+
+[2025-11-08 13:06:30.123] Topic: /BLEWIFI/users/1234567890abcdef
+Raw payload: Hex: aa 55 17 00 01 02 03 04 05 06 07 08 09 0a 0b 0c (24 bytes)
+✓ Parsing succeeded!
+Parsed data:
+{
+  "charger_state": "CHARGING",
+  "ev_status": "CONNECTED",
+  "power_kw": 7.2,
+  "session_energy_kwh": 12.5
+}
+------------------------------------------------------------
+```
+
+You can also run the standalone script:
+```bash
+python mqtt_monitor.py
+```
+
 ## Error Handling
 
 ```python

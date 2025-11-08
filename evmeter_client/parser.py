@@ -2,7 +2,7 @@
 
 import logging
 from itertools import islice
-from typing import Iterator
+from typing import Iterator, Union
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,12 +24,12 @@ def parse_data(iterator: Iterator[int]) -> str:
     return data.decode("ascii", errors="replace")
 
 
-def parse_blewifi_payload(payload_hex: str) -> dict:
+def parse_blewifi_payload(payload_hex: Union[str, bytes]) -> dict:
     """
     Parse the binary payload from a /BLEWIFI/users response.
 
     Args:
-        payload_hex: Hexadecimal string representation of the payload
+        payload_hex: Hexadecimal string representation of the payload OR bytes object
 
     Returns:
         Dictionary containing parsed data fields
@@ -43,14 +43,30 @@ def parse_blewifi_payload(payload_hex: str) -> dict:
     - If type == 0x03: WorkingInfo structure follows
     """
     try:
-        payload_bytes = bytes.fromhex(payload_hex)
+        # Handle both bytes and hex string input
+        if isinstance(payload_hex, bytes):
+            payload_bytes = payload_hex
+            payload_hex_str = payload_hex.hex()
+        else:
+            payload_bytes = bytes.fromhex(payload_hex)
+            payload_hex_str = payload_hex
 
         # Extract payload length and actual payload
         n = int.from_bytes(payload_bytes[:2], "little")
         payload = payload_bytes[2 : n + 2]
 
-        # Extract UUID (bytes 18-47 in original message)
-        uuid = payload_bytes[18:47].decode("ascii", errors="replace")
+        # Extract UUID (bytes 18-47 in original message) - display as hex for readability
+        uuid_bytes = payload_bytes[18:47] if len(payload_bytes) > 47 else b""
+        # Try to decode as ASCII first, fallback to hex if it contains non-printable characters
+        try:
+            uuid_ascii = uuid_bytes.decode("ascii")
+            # Check if it contains only printable ASCII characters
+            if all(32 <= ord(c) <= 126 for c in uuid_ascii):
+                uuid = uuid_ascii.strip('\x00')  # Remove null bytes
+            else:
+                uuid = uuid_bytes.hex() if uuid_bytes else ""
+        except UnicodeDecodeError:
+            uuid = uuid_bytes.hex() if uuid_bytes else ""
 
         # Parse payload content
         iterator = iter(payload)
@@ -72,7 +88,7 @@ def parse_blewifi_payload(payload_hex: str) -> dict:
 
     except (ValueError, IndexError, StopIteration) as e:
         _LOGGER.error("Failed to parse BLEWIFI payload: %s", e)
-        return {"error": str(e), "raw_payload": payload_hex}
+        return {"error": str(e), "raw_payload": payload_hex_str if 'payload_hex_str' in locals() else str(payload_hex)}
 
 
 def parse_working_info(iterator: Iterator[int]) -> dict:

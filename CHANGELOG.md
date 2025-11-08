@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- MQTT monitoring utility (`evmeter-monitor` CLI command)
+- Standalone MQTT monitor script (`mqtt_monitor.py`)
+- Command-line interface module (`evmeter_client.cli`)
+- Comprehensive examples script (`examples.py`)
+- Real-time MQTT traffic monitoring with parsing attempts
+- Formatted display of raw and parsed message data
+
+### Changed
+- Updated README with monitoring utility documentation
+- Added CLI entry point in pyproject.toml
+- Enhanced examples with monitoring use cases
+
 ## [1.0.0] - 2025-11-08
 
 ### Added
