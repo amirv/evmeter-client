@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import socket
 from typing import Any
 
 import aiomqtt
@@ -31,25 +32,74 @@ class EVMeterClient:
         self._client: aiomqtt.Client | None = None
         self._response_futures: dict[str, asyncio.Future] = {}
 
+    def _test_connectivity(self) -> bool:
+        """Test basic network connectivity to MQTT broker."""
+        _LOGGER.debug(f"Testing connectivity to {self.config.mqtt_host}:{self.config.mqtt_port}")
+        
+        try:
+            # Test basic TCP connectivity
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5.0)  # 5 second timeout
+            result = sock.connect_ex((self.config.mqtt_host, self.config.mqtt_port))
+            sock.close()
+            
+            if result == 0:
+                _LOGGER.debug("TCP connection test successful")
+                return True
+            else:
+                _LOGGER.error(f"TCP connection test failed with code: {result}")
+                return False
+                
+        except socket.gaierror as e:
+            _LOGGER.error(f"DNS resolution failed for {self.config.mqtt_host}: {e}")
+            return False
+        except Exception as e:
+            _LOGGER.error(f"Connectivity test failed: {e}")
+            return False
+
     async def connect(self) -> None:
         """Connect to the MQTT broker."""
         if self._client:
             _LOGGER.warning("Already connected.")
             return
 
-        self._client = aiomqtt.Client(
-            hostname=self.config.mqtt_host,
-            port=self.config.mqtt_port,
-            username=self.config.mqtt_username,
-            password=self.config.mqtt_password,
-        )
-        await self._client.__aenter__()
-        # Subscribe to the user's response topic
-        response_topic = self.config.response_topic_template.format(
-            user_id=self.config.user_id
-        )
-        await self._client.subscribe(response_topic, qos=self.config.qos)
-        asyncio.create_task(self._message_handler())
+        _LOGGER.debug(f"Connecting to MQTT broker {self.config.mqtt_host}:{self.config.mqtt_port}")
+        _LOGGER.debug(f"Using username: {self.config.mqtt_username}")
+        
+        # Test basic connectivity first
+        if not await asyncio.get_event_loop().run_in_executor(None, self._test_connectivity):
+            _LOGGER.error("Basic connectivity test failed, aborting MQTT connection")
+            raise EVMeterError(f"Cannot reach MQTT broker at {self.config.mqtt_host}:{self.config.mqtt_port}")
+        
+        try:
+            self._client = aiomqtt.Client(
+                hostname=self.config.mqtt_host,
+                port=self.config.mqtt_port,
+                username=self.config.mqtt_username,
+                password=self.config.mqtt_password,
+            )
+            _LOGGER.debug("MQTT client created, attempting connection...")
+            await self._client.__aenter__()
+            _LOGGER.debug("MQTT connection established successfully")
+            
+            # Subscribe to the user's response topic
+            response_topic = self.config.response_topic_template.format(
+                user_id=self.config.user_id
+            )
+            _LOGGER.debug(f"Subscribing to response topic: {response_topic}")
+            await self._client.subscribe(response_topic, qos=self.config.qos)
+            _LOGGER.debug(f"Successfully subscribed to {response_topic}")
+            
+            asyncio.create_task(self._message_handler())
+            _LOGGER.debug("Message handler task started")
+            
+        except Exception as e:
+            _LOGGER.error(f"Failed to connect to MQTT broker: {e}")
+            _LOGGER.error(f"Connection details: {self.config.mqtt_host}:{self.config.mqtt_port}")
+            _LOGGER.error(f"Exception type: {type(e).__name__}")
+            if hasattr(e, '__cause__') and e.__cause__:
+                _LOGGER.error(f"Underlying cause: {e.__cause__}")
+            raise EVMeterError(f"MQTT connection failed: {e}") from e
 
     async def disconnect(self) -> None:
         """Disconnect from the MQTT broker."""
@@ -102,36 +152,59 @@ class EVMeterClient:
         self, charger_id: str, command_payload: bytes
     ) -> dict[str, Any]:
         """Send a command and wait for a response."""
+        _LOGGER.debug(f"Sending command for charger: {charger_id}")
+        
         if not self._client:
+            _LOGGER.error("Cannot send command: not connected to MQTT broker")
             raise EVMeterError("Not connected to MQTT broker")
 
         command_topic = self.config.command_topic_template.format(charger_id=charger_id)
+        _LOGGER.debug(f"Command topic: {command_topic}")
 
         # Create future for response correlation
         # TODO: Use correlation ID from protocol for better request/response matching
         future = asyncio.get_running_loop().create_future()
         self._response_futures[charger_id] = future
+        _LOGGER.debug(f"Created response future for charger {charger_id}")
 
-        print(f"Sending command to topic: {command_topic}")
         # Create the proper command payload
         command_payload = self._create_command_payload(charger_id)
-        print(f"Command Payload (hex): {command_payload.hex()}")
-        # Publish the binary command payload
-        await self._client.publish(
-            command_topic, payload=command_payload, qos=self.config.qos
-        )
-
+        _LOGGER.debug(f"Command payload created, length: {len(command_payload)} bytes")
+        _LOGGER.debug(f"Command Payload (hex): {command_payload.hex()}")
+        
         try:
+            # Publish the binary command payload
+            _LOGGER.debug(f"Publishing command to {command_topic}")
+            await self._client.publish(
+                command_topic, payload=command_payload, qos=self.config.qos
+            )
+            _LOGGER.debug("Command published successfully")
+
+            # Wait for response
+            _LOGGER.debug(f"Waiting for response (timeout: {self.config.response_timeout}s)")
             response_payload = await asyncio.wait_for(
                 future, timeout=self.config.response_timeout
             )
+            _LOGGER.debug(f"Response received, length: {len(response_payload)} bytes")
+            _LOGGER.debug(f"Response payload (hex): {response_payload.hex()[:100]}...")
+            
             # Parse the binary response
-            return parse_blewifi_payload(response_payload.hex())
+            parsed_response = parse_blewifi_payload(response_payload.hex())
+            _LOGGER.debug(f"Parsed response type: {parsed_response.get('type')}")
+            return parsed_response
+            
         except asyncio.TimeoutError as e:
             self._response_futures.pop(charger_id, None)
+            _LOGGER.error(f"Timeout waiting for response from charger {charger_id}")
+            _LOGGER.error(f"Timeout was {self.config.response_timeout} seconds")
             raise EVMeterTimeoutError(
                 f"Timeout waiting for response for charger {charger_id}"
             ) from e
+        except Exception as e:
+            self._response_futures.pop(charger_id, None)
+            _LOGGER.error(f"Error sending command to charger {charger_id}: {e}")
+            _LOGGER.error(f"Exception type: {type(e).__name__}")
+            raise EVMeterError(f"Failed to send command: {e}") from e
 
     def _create_command_payload(self, charger_id: str) -> bytes:
         """
